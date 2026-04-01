@@ -412,15 +412,181 @@ a{color:inherit;text-decoration:none}
 /* DIVIDER */
 .divider{height:1px;background:var(--b1);margin:14px 0}
 
+
+/* ══════════════════════════════════════════════════
+   PRINT / DANFE ISOLADA
+══════════════════════════════════════════════════ */
+.danfe-sheet{
+  width:190mm;
+  min-height:277mm;
+  margin:0 auto;
+  background:#fff;
+  overflow:hidden;
+}
+.danfe-wrap{
+  width:100%;
+  max-width:990px;
+}
+.danfe{
+  overflow:hidden;
+}
+.d-chave-col{
+  overflow:hidden;
+}
+.d-barcode-wrap{
+  width:100%;
+  overflow:hidden;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:44px;
+}
+.d-barcode-wrap svg{
+  display:block;
+  max-width:100%;
+  width:100%;
+  height:auto;
+}
+.d-adic-row{
+  display:flex;
+  align-items:stretch;
+}
+.d-adic-text{
+  flex:1;
+  min-width:0;
+  padding:5px 7px;
+  border-right:1px solid #ccc;
+  font-size:6.5px;
+  line-height:1.7;
+}
+.d-fisco-text{
+  flex:1;
+  min-width:0;
+  padding:5px 7px;
+  border-right:1px solid #ccc;
+  font-size:6.5px;
+}
+.d-qr-wrap{
+  width:108px;
+  min-width:108px;
+  max-width:108px;
+  height:108px;
+  flex-shrink:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:4px;
+  gap:2px;
+  overflow:hidden;
+  background:#fff;
+}
+.d-qr-wrap svg,
+.d-qr-wrap canvas,
+.d-qr-wrap img{
+  display:block;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+}
+
 /* ══════════════════════════════════════════════════
    PRINT
 ══════════════════════════════════════════════════ */
+@page {
+  size: A4 portrait;
+  margin: 6mm;
+}
+
 @media print{
-  .nav,.sidebar,.preview-bar,.modal-overlay,.toast-box,.ld-overlay{display:none!important}
-  body{overflow:visible;background:#fff}
-  .shell,.view{display:block;height:auto;overflow:visible}
-  .preview-panel{background:#fff;padding:0;overflow:visible}
-  .danfe{box-shadow:none}
+  html,body{
+    margin:0 !important;
+    padding:0 !important;
+    width:auto !important;
+    height:auto !important;
+    overflow:visible !important;
+    background:#fff !important;
+  }
+
+  body > *:not(#print-root){
+    display:none !important;
+  }
+
+  #print-root{
+    display:block !important;
+    position:absolute !important;
+    left:0 !important;
+    top:0 !important;
+    width:100% !important;
+    margin:0 !important;
+    padding:0 !important;
+    background:#fff !important;
+  }
+
+  .danfe-sheet{
+    width:198mm !important;
+    min-height:auto !important;
+    margin:0 auto !important;
+    padding:0 !important;
+    background:#fff !important;
+    break-inside:avoid-page !important;
+    page-break-inside:avoid !important;
+  }
+
+  .danfe-wrap,
+  .danfe{
+    width:100% !important;
+    max-width:198mm !important;
+    margin:0 auto !important;
+    overflow:hidden !important;
+    box-shadow:none !important;
+  }
+
+  .danfe{
+    font-size:6.6px !important;
+  }
+
+  .dl{font-size:4.8px !important}
+  .dv{font-size:6.4px !important}
+  .d-pt th{font-size:5px !important;padding:2px !important}
+  .d-pt td{font-size:6px !important;padding:2px !important}
+  .dc,.dic{padding:2px 4px !important}
+
+  .d-canhoto,
+  .d-body,
+  .d-hdr,
+  .d-sec,
+  .d-cols,
+  .d-imp-row,
+  .d-adic-row,
+  table,
+  tr,
+  td,
+  th{
+    break-inside:avoid !important;
+    page-break-inside:avoid !important;
+  }
+
+  .d-adic-row{
+    display:flex !important;
+    align-items:stretch !important;
+    break-inside:avoid-page !important;
+    page-break-inside:avoid !important;
+  }
+
+  .d-adic-text{
+    flex:1 !important;
+    min-width:0 !important;
+  }
+
+  .d-qr-wrap{
+    width:108px !important;
+    min-width:108px !important;
+    max-width:108px !important;
+    height:108px !important;
+    overflow:hidden !important;
+    background:#fff !important;
+  }
 }
 </style>
 </head>
@@ -602,7 +768,7 @@ a{color:inherit;text-decoration:none}
     <div class="preview-bar">
       <div class="preview-bar-title">Pré-visualização — DANFE</div>
       <button class="pbtn pbtn-d" onclick="NF.preview()">↻ Atualizar</button>
-      <button class="pbtn pbtn-g" onclick="window.print()">🖨 Imprimir / PDF</button>
+      <button class="pbtn pbtn-g" onclick="window.printDanfe()">🖨 Imprimir / PDF</button>
     </div>
     <div class="danfe-wrap" id="danfe-output">
       <div class="d-ph"><div class="ico">📄</div><h3>Preencha os dados ao lado</h3><p>Clique em <strong>Pré-visualizar</strong> para ver o DANFE</p></div>
@@ -929,7 +1095,7 @@ a{color:inherit;text-decoration:none}
   <div class="modal">
     <div class="modal-head">
       <h3 id="modal-nota-title">Nota Fiscal</h3>
-      <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Imprimir</button>
+      <button class="btn btn-ghost btn-sm" onclick="window.printDanfe()">🖨 Imprimir</button>
       <button class="btn btn-primary btn-sm" id="btn-dup" onclick="ModalNota.duplicar()">⧉ Duplicar</button>
       <button class="btn btn-sm" id="btn-enviar-bling" onclick="ModalNota.enviarBling()" style="background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3)">⬆ Enviar ao Bling</button>
       <button class="btn btn-danger btn-sm" id="btn-cancel-nf" onclick="ModalNota.cancelar()">✕ Cancelar NF</button>
@@ -1404,16 +1570,16 @@ const Danfe = {
 
   <!-- ── Dados Adicionais ── -->
   <div class="d-sec" style="border-top:1px solid #000">Dados Adicionais</div>
-  <div style="display:flex;border-top:none;min-height:80px">
-    <div style="flex:2;padding:5px 7px;border-right:1px solid #ccc;font-size:6.5px;line-height:1.7">
+  <div class="d-adic-row">
+    <div class="d-adic-text">
       <span class="dl" style="margin-bottom:3px">Informações Complementares</span>
       ${U.esc(info).replace(/\n/g,'<br>') || '&nbsp;'}
     </div>
-    <div style="flex:1;padding:5px 7px;border-right:1px solid #ccc;font-size:6.5px">
+    <div class="d-fisco-text">
       <span class="dl" style="margin-bottom:3px">Reservado ao Fisco</span>
       <span>&nbsp;</span>
     </div>
-    <div style="width:90px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;gap:2px">
+    <div class="d-qr-wrap">
       ${qrSVG}
       <span style="font-size:4.5px;color:#555;text-align:center;line-height:1.4;margin-top:1px">Consulta NF-e</span>
     </div>
@@ -1885,7 +2051,7 @@ const NF = {
     if(!Items.list.length){ Toast.err('Adicione ao menos 1 produto'); return false; }
     return true;
   },
-  preview(){ document.getElementById('danfe-output').innerHTML=Danfe.build({}); },
+  preview(){ document.getElementById('danfe-output').innerHTML=Danfe.build(this.getPayload()); },
   async _submit(url){
     if(!this.validate()) return;
     const btn=document.getElementById('btn-emitir'); btn.disabled=true; Ld.show();
@@ -2788,7 +2954,69 @@ const App = {
     };
 
     Health.start();
-    initAutocompletes();
+    
+function ensurePrintRoot(){
+  let root=document.getElementById('print-root');
+  if(!root){
+    root=document.createElement('div');
+    root.id='print-root';
+    root.style.display='none';
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+function mountDanfeForPrint(){
+  const modalOpen=document.getElementById('modal-nota')?.classList.contains('open');
+  const sourceDanfe = modalOpen
+    ? document.querySelector('#modal-nota-content .danfe-wrap, #modal-nota-content .danfe')
+    : document.querySelector('#danfe-output .danfe-wrap, #danfe-output .danfe');
+
+  if(!sourceDanfe){
+    Toast.err('Nenhuma DANFE disponível para impressão.');
+    return null;
+  }
+
+  const root=ensurePrintRoot();
+
+  const danfeHtml = sourceDanfe.classList.contains('danfe-wrap')
+    ? sourceDanfe.outerHTML
+    : `<div class="danfe-wrap">${sourceDanfe.outerHTML}</div>`;
+
+  root.innerHTML=`<div class="danfe-sheet">${danfeHtml}</div>`;
+  root.style.display='block';
+  return root;
+}
+
+function cleanupPrintRoot(){
+  const root=document.getElementById('print-root');
+  if(root){
+    root.innerHTML='';
+    root.style.display='none';
+  }
+}
+
+function printDanfe(){
+  const mounted=mountDanfeForPrint();
+  if(!mounted) return;
+
+  const after=()=>{
+    cleanupPrintRoot();
+    window.removeEventListener('afterprint', after);
+  };
+
+  window.addEventListener('afterprint', after);
+
+  requestAnimationFrame(()=>{
+    requestAnimationFrame(()=>{
+      window.print();
+    });
+  });
+}
+window.printDanfe = printDanfe;
+
+
+initAutocompletes();
     Usuarios._createView();
     await Promise.all([NF.init(), Items.loadCatalog()]);
   }
@@ -2806,5 +3034,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 </script>
+<div id="print-root" style="display:none;"></div>
 </body>
 </html>
