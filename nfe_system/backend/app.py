@@ -18,9 +18,12 @@ import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from contextlib import closing
 from typing import Any
 
 from flask import Flask, Response, g, jsonify, request, send_from_directory
+
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import bling as _bling
 
@@ -30,7 +33,7 @@ import bling as _bling
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR  = os.path.dirname(BASE_DIR)
-DB_PATH   = os.path.join(ROOT_DIR, "db", "nfe.db")
+DB_PATH   = os.getenv("DB_PATH", os.path.join(ROOT_DIR, "db", "nfe.db"))
 FRONT_DIR = os.path.join(ROOT_DIR, "frontend")
 
 # Emitente padrão — sobrescrito pelos dados em config no banco
@@ -67,10 +70,10 @@ app = Flask(__name__, static_folder=FRONT_DIR)
 # ══════════════════════════════════════════════════════════════
 
 @app.after_request
-def apply_cors(response: Response) -> Response:
-    response.headers["Access-Control-Allow-Origin"]  = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+def protect_api_response(response: Response) -> Response:
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
 @app.route("/api/<path:path>", methods=["OPTIONS"])
@@ -335,7 +338,7 @@ def _get_emitente() -> dict[str, str]:
 
 def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         conn.executescript(_SCHEMA)
         conn.execute(
             "INSERT OR IGNORE INTO nf_sequences(serie, ultimo_numero, updated_at) VALUES (?,?,?)",
@@ -351,22 +354,37 @@ def init_db() -> None:
         conn.commit()
     log.info("Banco inicializado em %s", DB_PATH)
     _seed_admin()
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
+        conn.execute("DELETE FROM sessoes WHERE length(token) != 64 OR token GLOB '*[^0-9a-f]*'")
 
 
 def _seed_admin() -> None:
-    """Cria usuário admin padrão se não houver nenhum usuário cadastrado."""
-    with sqlite3.connect(DB_PATH) as conn:
+    """Cria o primeiro admin ou substitui a antiga senha de demonstração."""
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         count = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
-        if count == 0:
-            now = _now_iso()
+        old_hash = _legacy_hash("admin123")
+        default_admin = conn.execute(
+            "SELECT id FROM usuarios WHERE username = 'admin' AND senha_hash = ?", (old_hash,)
+        ).fetchone()
+        if count and not default_admin:
+            return
+
+        password = os.getenv("NFE_ADMIN_PASSWORD", "").strip()
+        if len(password) < 12 or password == "admin123":
+            raise RuntimeError("Defina NFE_ADMIN_PASSWORD com pelo menos 12 caracteres para iniciar.")
+        now = _now_iso()
+        if default_admin:
+            conn.execute(
+                "UPDATE usuarios SET senha_hash = ?, updated_at = ? WHERE id = ? AND senha_hash = ?",
+                (_hash_senha(password), now, default_admin[0], old_hash),
+            )
+            conn.execute("DELETE FROM sessoes WHERE usuario_id = ?", (default_admin[0],))
+        else:
             conn.execute(
                 """INSERT INTO usuarios(id,username,nome,senha_hash,perfil,ativo,created_at,updated_at)
                    VALUES (?,?,?,?,?,1,?,?)""",
-                (str(uuid.uuid4()), "admin", "Administrador",
-                 _hash_senha("admin123"), "admin", now, now),
+                (str(uuid.uuid4()), "admin", "Administrador", _hash_senha(password), "admin", now, now),
             )
-            conn.commit()
-            log.info("Usuário admin criado — login: admin / senha: admin123")
 
 
 def seed_produtos() -> None:
@@ -377,7 +395,7 @@ def seed_produtos() -> None:
     with open(catalog_path, encoding="utf-8") as fh:
         products: list[dict] = json.load(fh)
     now = _now_iso()
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         conn.executemany(
             """INSERT OR IGNORE INTO produtos
                (codigo,nome,descricao_danfe,ncm,unidade,
@@ -428,8 +446,8 @@ def _audit(db: sqlite3.Connection, tabela: str, operacao: str,
     )
 
 def _pagination() -> tuple[int, int]:
-    limit  = min(int(request.args.get("limit", 50)), 500)
-    offset = max(int(request.args.get("offset", 0)), 0)
+    limit  = min(max(request.args.get("limit", 50, type=int), 1), 500)
+    offset = max(request.args.get("offset", 0, type=int), 0)
     return limit, offset
 
 
@@ -437,14 +455,26 @@ def _pagination() -> tuple[int, int]:
 #  AUTENTICAÇÃO — sessões com token Bearer
 # ══════════════════════════════════════════════════════════════
 
+def _legacy_hash(senha: str) -> str:
+    return hashlib.sha256(f"nfe_stefanini_salt_v3:{senha}".encode()).hexdigest()
+
+
 def _hash_senha(senha: str) -> str:
-    """SHA-256 com salt fixo — adequado para equipes pequenas sem infraestrutura externa."""
-    salt = "nfe_stefanini_salt_v3"
-    return hashlib.sha256(f"{salt}:{senha}".encode()).hexdigest()
+    return generate_password_hash(senha)
+
+
+def _senha_valida(senha: str, armazenada: str) -> bool:
+    if re.fullmatch(r"[a-f0-9]{64}", armazenada):
+        return secrets.compare_digest(armazenada, _legacy_hash(senha))
+    return check_password_hash(armazenada, senha)
 
 
 def _gerar_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def _get_sessao() -> dict | None:
@@ -458,7 +488,7 @@ def _get_sessao() -> dict | None:
         """SELECT u.id, u.username, u.nome, u.perfil
            FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id
            WHERE s.token = ? AND s.expires_at > ? AND u.ativo = 1""",
-        (token, _now_iso()),
+        (_hash_token(token), _now_iso()),
     ).fetchone()
     return _row(row)
 
@@ -502,9 +532,13 @@ def login() -> Response:
         "SELECT * FROM usuarios WHERE username = ? AND ativo = 1 COLLATE NOCASE", (username,)
     ).fetchone())
 
-    if not user or user["senha_hash"] != _hash_senha(senha):
-        log.warning("Login inválido: %s", username)
+    if not user or (user["username"].lower() == "admin" and senha == "admin123") or not _senha_valida(senha, user["senha_hash"]):
+        log.warning("Login inválido")
         return _err("Usuário ou senha incorretos", 401)
+
+    if re.fullmatch(r"[a-f0-9]{64}", user["senha_hash"]):
+        db.execute("UPDATE usuarios SET senha_hash = ? WHERE id = ? AND senha_hash = ?",
+                   (_hash_senha(senha), user["id"], user["senha_hash"]))
 
     token      = _gerar_token()
     now        = _now_iso()
@@ -514,7 +548,7 @@ def login() -> Response:
     db.execute("DELETE FROM sessoes WHERE usuario_id = ? AND expires_at < ?", (user["id"], now))
     db.execute(
         "INSERT INTO sessoes(token, usuario_id, expires_at, created_at) VALUES (?,?,?,?)",
-        (token, user["id"], expires_at, now),
+        (_hash_token(token), user["id"], expires_at, now),
     )
     db.execute("UPDATE usuarios SET ultimo_login = ?, updated_at = ? WHERE id = ?",
                (now, now, user["id"]))
@@ -533,7 +567,7 @@ def login() -> Response:
 def logout() -> Response:
     token = request.headers.get("Authorization", "")[7:]
     db    = get_db()
-    db.execute("DELETE FROM sessoes WHERE token = ?", (token,))
+    db.execute("DELETE FROM sessoes WHERE token = ?", (_hash_token(token),))
     db.commit()
     return jsonify({"mensagem": "Logout realizado"})
 
@@ -553,11 +587,11 @@ def trocar_senha() -> Response:
     nova  = str(data.get("nova_senha") or "").strip()
     if not atual or not nova:
         return _err("senha_atual e nova_senha são obrigatórios")
-    if len(nova) < 6:
-        return _err("A nova senha deve ter pelo menos 6 caracteres")
+    if len(nova) < 12:
+        return _err("A nova senha deve ter pelo menos 12 caracteres")
     user = _row(db.execute("SELECT * FROM usuarios WHERE id = ?",
                            (g.current_user["id"],)).fetchone())
-    if user["senha_hash"] != _hash_senha(atual):
+    if not _senha_valida(atual, user["senha_hash"]):
         return _err("Senha atual incorreta", 401)
     db.execute("UPDATE usuarios SET senha_hash = ?, updated_at = ? WHERE id = ?",
                (_hash_senha(nova), _now_iso(), g.current_user["id"]))
@@ -590,8 +624,8 @@ def criar_usuario() -> Response:
         return _err("username, nome e senha são obrigatórios")
     if perfil not in ("admin", "operador"):
         return _err("perfil deve ser 'admin' ou 'operador'")
-    if len(senha) < 6:
-        return _err("A senha deve ter no mínimo 6 caracteres")
+    if len(senha) < 12:
+        return _err("A senha deve ter no mínimo 12 caracteres")
     if db.execute("SELECT 1 FROM usuarios WHERE username = ? COLLATE NOCASE",
                   (username,)).fetchone():
         return _err("Este username já está em uso")
@@ -626,12 +660,12 @@ def atualizar_usuario(uid: str) -> Response:
     params = [nome, perfil, ativo, _now_iso()]
     nova_senha = str(data.get("nova_senha") or "").strip()
     if nova_senha:
-        if len(nova_senha) < 6: return _err("Senha deve ter ≥ 6 caracteres")
+        if len(nova_senha) < 12: return _err("Senha deve ter pelo menos 12 caracteres")
         cols.append("senha_hash = ?"); params.append(_hash_senha(nova_senha))
     params.append(uid)
 
     db.execute(f"UPDATE usuarios SET {', '.join(cols)} WHERE id = ?", params)
-    if not ativo:
+    if not ativo or nova_senha:
         db.execute("DELETE FROM sessoes WHERE usuario_id = ?", (uid,))
     _audit(db, "usuarios", "UPDATE", uid)
     db.commit()
@@ -732,17 +766,20 @@ def _parse_item(raw: Any, seq: int) -> tuple[ItemPayload | None, str]:
 @app.get("/api/configuracoes")
 def get_configuracoes() -> Response:
     db   = get_db()
-    rows = db.execute("SELECT chave, valor, descricao, updated_at FROM configuracoes ORDER BY chave").fetchall()
+    rows = db.execute("SELECT chave, valor, updated_at FROM configuracoes WHERE substr(chave, 1, 5) = 'emit_' ORDER BY chave").fetchall()
     return jsonify({r["chave"]: {"valor": r["valor"], "updated_at": r["updated_at"]} for r in rows})
 
 
 @app.put("/api/configuracoes")
+@_require_admin
 def salvar_configuracoes() -> Response:
     db   = get_db()
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return _err("Payload inválido")
     now = _now_iso()
+    if any(chave not in {f"emit_{field}" for field in _EMITENTE_DEFAULT} for chave in data):
+        return _err("Campo de configuração não permitido")
     for chave, valor in data.items():
         db.execute(
             "INSERT OR REPLACE INTO configuracoes(chave, valor, updated_at) VALUES (?,?,?)",
@@ -1649,13 +1686,16 @@ def bling_oauth_callback() -> Response:
         return _err("Parâmetro 'code' ausente no callback")
 
     db = get_db()
-    # Valida CSRF state
-    saved_state_row = db.execute(
-        "SELECT valor FROM configuracoes WHERE chave = 'bling_oauth_state'"
-    ).fetchone()
-    saved_state = saved_state_row["valor"] if saved_state_row else ""
-    if saved_state and state and state != saved_state:
-        return _err("State CSRF inválido — possível ataque CSRF", 403)
+    if not state:
+        return _err("State OAuth inválido ou expirado", 403)
+    consumed = db.execute(
+        """DELETE FROM configuracoes WHERE chave = 'bling_oauth_state' AND valor = ?
+           AND updated_at >= ?""",
+        (state, (datetime.datetime.now() - datetime.timedelta(minutes=10)).isoformat(timespec="seconds")),
+    ).rowcount
+    db.commit()
+    if not consumed:
+        return _err("State OAuth inválido ou expirado", 403)
 
     creds = _bling_creds()
     if not creds.client_id or not creds.client_secret:
@@ -1666,15 +1706,9 @@ def bling_oauth_callback() -> Response:
             code, creds.client_id, creds.client_secret, creds.redirect_uri
         )
     except _bling.BlingHttpError as exc:
-        return _err(f"Erro ao trocar code por token: {exc}", 502)
+        return _err("Não foi possível concluir a autorização no Bling", 502)
 
     creds.save_tokens(token_resp)
-    # Invalida o state usado
-    db.execute(
-        "INSERT OR REPLACE INTO configuracoes(chave, valor, updated_at) VALUES(?,?,?)",
-        ("bling_oauth_state", "", _now_iso()),
-    )
-    db.commit()
     _audit(db, "bling", "CONNECT", "oauth", {"client_id": creds.client_id})
 
     # Retorna HTML de sucesso (o browser exibirá após o redirect)
@@ -1974,4 +2008,4 @@ if __name__ == "__main__":
     print("\n" + "=" * 56)
     print("  🟢  NF-e Sistema  →  http://localhost:5000")
     print("=" * 56 + "\n")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False)

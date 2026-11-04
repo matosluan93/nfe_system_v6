@@ -24,6 +24,11 @@ nfe_system/
 
 ## 🚀 Como Iniciar
 
+No primeiro uso ou ao migrar o administrador de demonstração, defina NFE_ADMIN_PASSWORD
+com uma senha inédita de pelo menos 12 caracteres. A aplicação salva apenas o hash.
+Use DB_PATH para apontar para um banco local existente. Sessões em formato anterior
+são invalidadas na atualização, e os usuários devem entrar novamente.
+
 ### Opção 1 — Script automático (Linux / macOS)
 ```bash
 chmod +x start.sh
@@ -170,7 +175,7 @@ Para alterar dados do **emitente** (CNPJ, razão social, endereço), edite:
 
 Para alterar a **porta do servidor**, edite a última linha de `backend/app.py`:
 ```python
-app.run(host='0.0.0.0', port=5000, debug=True)
+app.run(host="127.0.0.1", port=5000, debug=False)
 ```
 
 ---
