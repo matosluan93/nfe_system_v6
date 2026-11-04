@@ -55,7 +55,7 @@ BLING_SCOPES = [
 
 class BlingHttpError(Exception):
     def __init__(self, status: int, body: str) -> None:
-        super().__init__(f"Bling API {status}: {body[:300]}")
+        super().__init__(f"Bling API {status}")
         self.status = status
         self.body   = body
 
@@ -108,7 +108,7 @@ def _bling_request(
             return json.loads(raw) if raw.strip() else {}
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode()
-        log.error("Bling HTTP %s %s → %d  %s", method, url, exc.code, raw[:200])
+        log.warning("Bling HTTP %s retornou %d", method, exc.code)
         raise BlingHttpError(exc.code, raw)
     except urllib.error.URLError as exc:
         raise BlingHttpError(0, f"Conexão falhou: {exc.reason}")
